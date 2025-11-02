@@ -118,6 +118,68 @@ export function CanvasWorkspace({
     renderCanvas();
   }, [masks, imageDimensions, imageLoaded]);
 
+  const floodFillMask = (x: number, y: number): string => {
+    const baseImage = baseImageRef.current;
+    if (!baseImage) return '';
+
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = baseImage.naturalWidth;
+    tempCanvas.height = baseImage.naturalHeight;
+    const ctx = tempCanvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return '';
+
+    ctx.drawImage(baseImage, 0, 0);
+    const imageData = ctx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+    const data = imageData.data;
+
+    const tolerance = 30;
+    const targetPos = (y * tempCanvas.width + x) * 4;
+    const targetR = data[targetPos];
+    const targetG = data[targetPos + 1];
+    const targetB = data[targetPos + 2];
+
+    const visited = new Uint8Array(tempCanvas.width * tempCanvas.height);
+    const stack = [[x, y]];
+    
+    const colorMatch = (pos: number) => {
+      const r = data[pos];
+      const g = data[pos + 1];
+      const b = data[pos + 2];
+      return Math.abs(r - targetR) <= tolerance &&
+             Math.abs(g - targetG) <= tolerance &&
+             Math.abs(b - targetB) <= tolerance;
+    };
+
+    while (stack.length > 0) {
+      const [cx, cy] = stack.pop()!;
+      if (cx < 0 || cx >= tempCanvas.width || cy < 0 || cy >= tempCanvas.height) continue;
+      
+      const index = cy * tempCanvas.width + cx;
+      if (visited[index]) continue;
+      
+      const pos = index * 4;
+      if (!colorMatch(pos)) continue;
+      
+      visited[index] = 255;
+      
+      stack.push([cx + 1, cy], [cx - 1, cy], [cx, cy + 1], [cx, cy - 1]);
+    }
+
+    const maskData = ctx.createImageData(tempCanvas.width, tempCanvas.height);
+    for (let i = 0; i < visited.length; i++) {
+      const alpha = visited[i];
+      maskData.data[i * 4 + 3] = alpha;
+      if (alpha > 0) {
+        maskData.data[i * 4] = 255;
+        maskData.data[i * 4 + 1] = 255;
+        maskData.data[i * 4 + 2] = 255;
+      }
+    }
+    
+    ctx.putImageData(maskData, 0, 0);
+    return tempCanvas.toDataURL();
+  };
+
   const handleCanvasClick = async (e: React.MouseEvent<HTMLDivElement>) => {
     if (!imageUrl || isSegmenting) return;
 
@@ -136,18 +198,15 @@ export function CanvasWorkspace({
     setIsSegmenting(true);
 
     try {
-      const response = await apiRequest('POST', `/api/segment`, {
-        imageUrl,
-        clickX: actualX,
-        clickY: actualY,
-        imageId: imageId || undefined
-      });
-
-      const data = await response.json();
+      const maskUrl = floodFillMask(actualX, actualY);
+      
+      if (!maskUrl) {
+        throw new Error('Failed to create mask');
+      }
 
       const newMask: ColoredMask = {
         id: crypto.randomUUID(),
-        maskUrl: data.maskUrl,
+        maskUrl,
         color: selectedColor,
         opacity: 0.7,
         clickX: actualX,
@@ -157,15 +216,15 @@ export function CanvasWorkspace({
       setMasks(prev => [...prev, newMask]);
 
       toast({
-        title: "Part detected!",
-        description: "Click detected furniture part. You can now change colors or click another part.",
+        title: "Part selected!",
+        description: "Selected similar-colored area. Click to select more parts or change colors.",
       });
 
     } catch (error) {
       console.error('Segmentation error:', error);
       toast({
-        title: "Segmentation failed",
-        description: error instanceof Error ? error.message : "Failed to detect furniture part. Please try again.",
+        title: "Selection failed",
+        description: "Failed to select area. Please try clicking a different spot.",
         variant: "destructive"
       });
     } finally {

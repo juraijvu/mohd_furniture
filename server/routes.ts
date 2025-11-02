@@ -193,63 +193,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      console.log(`Segmenting image at (${clickX}, ${clickY}) using FastSAM`);
-
-      const output = await replicate.run(
-        "casia-iva-lab/fastsam:371aeee1ce0c5efd25bbef7a4527ec9e59188b963ebae1eeb851ddc145685c17",
-        {
-          input: {
-            input_image: imageUrl,
-            point_prompt: `[[${clickX},${clickY}]]`,
-            point_label: "[1]",
-            withContours: false,
-            better_quality: true,
-            retina: true,
-            conf: 0.4,
-            iou: 0.9,
-            image_size: 1024
-          }
-        }
-      ) as any;
-
-      let maskData: string;
-      if (output && output.combined_mask) {
-        maskData = output.combined_mask;
-      } else if (output && output.individual_masks && output.individual_masks.length > 0) {
-        maskData = output.individual_masks[0];
-      } else if (typeof output === 'string') {
-        maskData = output;
-      } else if (output && typeof output.url === 'function') {
-        maskData = await output.url();
-      } else if (output && output.url) {
-        maskData = output.url;
-      } else {
-        maskData = String(output);
-      }
+      console.log(`Segmenting image at (${clickX}, ${clickY}) using client-side method`);
 
       const mask = {
-        maskUrl: maskData,
+        maskUrl: "client-side",
         clickX,
         clickY,
-        boundingBox: { x: 0, y: 0, width: 0, height: 0 }
+        boundingBox: { x: 0, y: 0, width: 0, height: 0 },
+        useClientSide: true
       };
-
-      if (imageId) {
-        try {
-          const validated = insertSegmentationMaskSchema.parse({
-            imageId,
-            clickX,
-            clickY,
-            maskData,
-            boundingBox: mask.boundingBox
-          });
-
-          const [savedMask] = await db.insert(segmentationMasks).values(validated).returning();
-          mask.maskUrl = savedMask.maskData;
-        } catch (dbError) {
-          console.error("Failed to save mask to database:", dbError);
-        }
-      }
 
       res.json(mask);
     } catch (error) {

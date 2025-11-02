@@ -62,6 +62,9 @@ export default function Home() {
 
       const data = await response.json();
       
+      setUploadedImage(data.fullUrl);
+      setProjectName(file.name.replace(/\.[^/.]+$/, ""));
+      
       const projectToUse = currentProjectId ? currentProjectId : (await createProjectMutation.mutateAsync({
         name: file.name.replace(/\.[^/.]+$/, ""),
         previewImageUrl: data.path
@@ -72,25 +75,36 @@ export default function Home() {
       }
       
       const img = new Image();
+      img.crossOrigin = "anonymous";
       img.onload = async () => {
-        const imageRecord = await fetch(`/api/projects/${projectToUse}/images`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            projectId: projectToUse,
-            originalImagePath: data.path,
-            mimeType: data.mimetype,
-            width: img.naturalWidth,
-            height: img.naturalHeight
-          })
-        });
-        
-        if (imageRecord.ok) {
-          const imageData = await imageRecord.json();
-          setUploadedImageId(imageData.id);
-          setUploadedImage(data.fullUrl);
-          setProjectName(file.name.replace(/\.[^/.]+$/, ""));
+        try {
+          const imageRecord = await fetch(`/api/projects/${projectToUse}/images`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              projectId: projectToUse,
+              originalImagePath: data.path,
+              mimeType: data.mimetype,
+              width: img.naturalWidth,
+              height: img.naturalHeight
+            })
+          });
+          
+          if (imageRecord.ok) {
+            const imageData = await imageRecord.json();
+            setUploadedImageId(imageData.id);
+          }
+        } catch (err) {
+          console.error('Failed to save image record:', err);
         }
+      };
+      img.onerror = () => {
+        console.error('Failed to load image:', data.fullUrl);
+        toast({
+          title: "Image Load Failed",
+          description: "The uploaded image couldn't be loaded. Please try again.",
+          variant: "destructive"
+        });
       };
       img.src = data.fullUrl;
     } catch (error) {

@@ -5,12 +5,24 @@ import UploadZone from "@/components/UploadZone";
 import { CanvasWorkspace } from "@/components/CanvasWorkspace";
 import PropertiesPanel from "@/components/PropertiesPanel";
 import ProjectGallery from "@/components/ProjectGallery";
+import { Button } from "@/components/ui/button";
+import { Loader2, Sparkles } from "lucide-react";
 import type { ColorItem } from "@/data/colorPalette";
 import sofaImage from '@assets/generated_images/Modern_grey_sofa_furniture_4bccca05.png';
 import chairImage from '@assets/generated_images/Beige_dining_chair_c4cca64b.png';
 import officeChairImage from '@assets/generated_images/Brown_office_chair_3fdc19ca.png';
 import tableImage from '@assets/generated_images/Round_wooden_side_table_c2d711ab.png';
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useToast } from "@/hooks/use-toast";
+
+interface FurniturePart {
+  maskId: string;
+  maskData: string;
+  boundingBox: { x: number; y: number; width: number; height: number };
+  partLabel: string;
+  confidence: number;
+  area: number;
+}
 
 export default function Home() {
   const [projectName, setProjectName] = useState("Untitled Project");
@@ -20,7 +32,10 @@ export default function Home() {
   const [recentColors, setRecentColors] = useState<ColorItem[]>([]);
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
+  const [furnitureParts, setFurnitureParts] = useState<FurniturePart[]>([]);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const queryClient = useQueryClient();
+  const { toast } = useToast();
 
   const handleColorSelect = (color: ColorItem) => {
     setSelectedColor(color);
@@ -80,6 +95,56 @@ export default function Home() {
       img.src = data.fullUrl;
     } catch (error) {
       console.error('Upload error:', error);
+      toast({
+        title: "Upload Failed",
+        description: "Failed to upload furniture image. Please try again.",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const handleAnalyzeFurniture = async () => {
+    if (!uploadedImage) {
+      toast({
+        title: "No Image",
+        description: "Please upload a furniture image first.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    setIsAnalyzing(true);
+    try {
+      const response = await fetch('/api/segment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageUrl: uploadedImage,
+          imageId: uploadedImageId,
+          autoSegment: true
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Segmentation failed');
+      }
+
+      const data = await response.json();
+      setFurnitureParts(data.masks || []);
+      
+      toast({
+        title: "Analysis Complete",
+        description: `Detected ${data.masks?.length || 0} furniture parts`,
+      });
+    } catch (error) {
+      console.error('Segmentation error:', error);
+      toast({
+        title: "Analysis Failed",
+        description: "Failed to analyze furniture parts. Please try again.",
+        variant: "destructive"
+      });
+    } finally {
+      setIsAnalyzing(false);
     }
   };
 
@@ -179,11 +244,48 @@ export default function Home() {
 
         <div className="flex-1 flex flex-col min-w-0">
           {uploadedImage ? (
-            <CanvasWorkspace 
-              imageUrl={uploadedImage}
-              selectedColor={selectedColor?.hexColor}
-              imageId={uploadedImageId || undefined}
-            />
+            <div className="flex-1 relative">
+              {furnitureParts.length === 0 && !isAnalyzing && (
+                <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/80 backdrop-blur-sm">
+                  <div className="text-center space-y-4 max-w-md p-8">
+                    <div className="mx-auto w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
+                      <Sparkles className="w-8 h-8 text-primary" />
+                    </div>
+                    <h2 className="text-2xl font-semibold">Furniture Image Uploaded</h2>
+                    <p className="text-muted-foreground">
+                      Click the button below to automatically detect all furniture parts (legs, seats, cushions, etc.) 
+                      so you can precisely customize each part with your color palette.
+                    </p>
+                    <Button 
+                      onClick={handleAnalyzeFurniture}
+                      size="lg"
+                      className="mt-4"
+                      data-testid="button-analyze-furniture"
+                    >
+                      <Sparkles className="w-4 h-4 mr-2" />
+                      Analyze Furniture Parts
+                    </Button>
+                  </div>
+                </div>
+              )}
+              {isAnalyzing && (
+                <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/80 backdrop-blur-sm">
+                  <div className="text-center space-y-4">
+                    <Loader2 className="w-16 h-16 animate-spin text-primary mx-auto" />
+                    <h2 className="text-2xl font-semibold">Analyzing Furniture...</h2>
+                    <p className="text-muted-foreground">
+                      AI is detecting furniture parts. This may take 30-60 seconds.
+                    </p>
+                  </div>
+                </div>
+              )}
+              <CanvasWorkspace 
+                imageUrl={uploadedImage}
+                selectedColor={selectedColor?.hexColor}
+                imageId={uploadedImageId || undefined}
+                furnitureParts={furnitureParts}
+              />
+            </div>
           ) : (
             <div className="flex-1 flex items-center justify-center p-8">
               <div className="w-full max-w-2xl">

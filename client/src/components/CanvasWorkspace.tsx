@@ -6,11 +6,21 @@ import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 
+interface FurniturePart {
+  maskId: string;
+  maskData: string;
+  boundingBox: { x: number; y: number; width: number; height: number };
+  partLabel: string;
+  confidence: number;
+  area: number;
+}
+
 interface CanvasWorkspaceProps {
   imageUrl?: string;
   selectedColor?: string;
   imageId?: string;
   className?: string;
+  furnitureParts?: FurniturePart[];
 }
 
 interface ColoredMask {

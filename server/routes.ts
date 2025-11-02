@@ -14,7 +14,7 @@ import {
 } from "@shared/schema";
 import { eq, desc } from "drizzle-orm";
 import multer from "multer";
-import { writeFile, mkdir } from "fs/promises";
+import { writeFile, mkdir, readFile } from "fs/promises";
 import { join, extname } from "path";
 import { existsSync } from "fs";
 import { randomUUID } from "crypto";
@@ -180,10 +180,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/segment", async (req, res) => {
     try {
-      const { imageUrl, clickX, clickY, imageId } = req.body;
+      const { imageUrl, clickX, clickY, imageId, autoSegment } = req.body;
 
-      if (!imageUrl || clickX === undefined || clickY === undefined) {
-        return res.status(400).json({ message: "Missing required parameters: imageUrl, clickX, clickY" });
+      if (!imageUrl) {
+        return res.status(400).json({ message: "Missing required parameter: imageUrl" });
       }
 
       if (imageId) {
@@ -193,17 +193,60 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      console.log(`Segmenting image at (${clickX}, ${clickY}) using client-side method`);
+      console.log(autoSegment ? `Auto-segmenting entire image using SAM` : `Segmenting image at (${clickX}, ${clickY}) using SAM`);
 
-      const mask = {
-        maskUrl: "client-side",
-        clickX,
-        clickY,
-        boundingBox: { x: 0, y: 0, width: 0, height: 0 },
-        useClientSide: true
+      const input: any = {
+        image: imageUrl,
       };
 
-      res.json(mask);
+      if (autoSegment) {
+        const output = await replicate.run(
+          "cjwbw/semantic-segment-anything",
+          { input }
+        );
+
+        console.log('SAM auto-segmentation result:', output);
+
+        const masks = Array.isArray(output) ? output : [];
+        const processedMasks = masks.map((mask: any, index: number) => ({
+          maskId: `mask-${index}`,
+          maskData: mask.segmentation || '',
+          boundingBox: {
+            x: mask.bbox?.[0] || 0,
+            y: mask.bbox?.[1] || 0,
+            width: mask.bbox?.[2] || 0,
+            height: mask.bbox?.[3] || 0
+          },
+          partLabel: mask.class_name || `Part ${index + 1}`,
+          confidence: mask.stability_score || mask.predicted_iou || 1,
+          area: mask.area || 0,
+          clickX: null,
+          clickY: null
+        }));
+
+        res.json({ masks: processedMasks });
+      } else {
+        if (clickX === undefined || clickY === undefined) {
+          return res.status(400).json({ message: "Missing required parameters: clickX, clickY for point-based segmentation" });
+        }
+
+        input.point = [[clickX, clickY]];
+        input.point_labels = [1];
+
+        const output = await replicate.run(
+          "lucataco/segment-anything-2",
+          { input }
+        );
+
+        console.log('SAM point-based segmentation result:', output);
+
+        res.json({
+          maskUrl: output,
+          clickX,
+          clickY,
+          boundingBox: { x: 0, y: 0, width: 0, height: 0 }
+        });
+      }
     } catch (error) {
       console.error("Segmentation error:", error);
       res.status(500).json({ 

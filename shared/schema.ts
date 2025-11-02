@@ -45,10 +45,13 @@ export type ProjectImage = typeof projectImages.$inferSelect;
 export const segmentationMasks = pgTable("segmentation_masks", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   imageId: varchar("image_id").notNull().references(() => projectImages.id, { onDelete: 'cascade' }),
-  clickX: integer("click_x").notNull(),
-  clickY: integer("click_y").notNull(),
+  clickX: integer("click_x"),
+  clickY: integer("click_y"),
   maskData: text("mask_data").notNull(), // Base64 encoded mask PNG or compressed binary
   boundingBox: jsonb("bounding_box").notNull(), // {x, y, width, height}
+  partLabel: text("part_label"), // Semantic label from SAM (e.g., "chair leg", "cushion")
+  confidence: numeric("confidence"), // Quality/stability score from SAM
+  area: integer("area"), // Mask area in pixels
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 });
 

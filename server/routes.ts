@@ -196,15 +196,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log(`Segmenting image at (${clickX}, ${clickY}) using FastSAM`);
 
       const output = await replicate.run(
-        "casia-iva-lab/fastsam",
+        "casia-iva-lab/fastsam:371aeee1ce0c5efd25bbef7a4527ec9e59188b963ebae1eeb851ddc145685c17",
         {
           input: {
-            image: imageUrl,
+            input_image: imageUrl,
             point_prompt: `[[${clickX},${clickY}]]`,
             point_label: "[1]",
             withContours: false,
             better_quality: true,
-            retina: true
+            retina: true,
+            conf: 0.4,
+            iou: 0.9,
+            image_size: 1024
           }
         }
       ) as any;

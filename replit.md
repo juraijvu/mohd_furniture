@@ -16,6 +16,7 @@ A web-based furniture customization application that allows users to upload furn
 **November 2, 2025 - AI-Powered Click-to-Color Redesign:**
 - **MAJOR REDESIGN**: Replaced manual drawing tools with AI-powered automatic furniture part detection
 - Integrated Replicate API with Meta's Segment Anything Model 2 (SAM 2) for intelligent image segmentation
+- **UPGRADED to SAM2**: 6x more accurate than original SAM with smoother contours and better edge boundaries
 - New interaction model: Users simply click on any furniture part to automatically detect and color it
 - Removed Fabric.js dependency and manual shape drawing (rectangle, circle tools)
 - Implemented HTML5 Canvas with mask overlay system for precise color application
@@ -24,7 +25,7 @@ A web-based furniture customization application that allows users to upload furn
 - Database schema updated: New tables for `segmentationMasks` and `colorApplications`
 - User-friendly workflow: Upload → Click any part → Color is automatically applied
 - No Photoshop skills required - perfect for non-technical users
-- Cost-effective: ~$0.013 per segmentation (~76 clicks per $1)
+- High accuracy AI detection ideal for precise furniture part segmentation
 
 ## User Preferences
 

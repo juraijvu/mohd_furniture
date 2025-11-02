@@ -193,22 +193,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      console.log(`Segmenting image at (${clickX}, ${clickY})`);
+      console.log(`Segmenting image at (${clickX}, ${clickY}) using SAM2`);
 
       const output = await replicate.run(
-        "casia-iva-lab/fastsam",
+        "meta/sam-2",
         {
           input: {
             image: imageUrl,
-            point_prompt: `[[${clickX},${clickY}]]`,
-            point_label: "[1]",
-            withContours: false
+            input_points: [[clickX, clickY]],
+            input_labels: [1]
           }
         }
       ) as any;
 
       let maskData: string;
-      if (typeof output === 'string') {
+      if (output && output.combined_mask) {
+        maskData = output.combined_mask;
+      } else if (output && output.individual_masks && output.individual_masks.length > 0) {
+        maskData = output.individual_masks[0];
+      } else if (typeof output === 'string') {
         maskData = output;
       } else if (output && typeof output.url === 'function') {
         maskData = await output.url();

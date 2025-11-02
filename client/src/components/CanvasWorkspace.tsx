@@ -81,7 +81,7 @@ export function CanvasWorkspace({
     }
   }, [imageUrl, toast]);
 
-  const renderCanvas = () => {
+  const renderCanvas = async () => {
     const canvas = canvasRef.current;
     const baseImage = baseImageRef.current;
     if (!canvas || !baseImage || !imageLoaded) return;
@@ -94,24 +94,71 @@ export function CanvasWorkspace({
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    masks.forEach(mask => {
-      const maskImg = new Image();
-      maskImg.crossOrigin = "anonymous";
-      maskImg.onload = () => {
-        ctx.save();
+    for (const mask of masks) {
+      try {
+        const maskImg = await new Promise<HTMLImageElement>((resolve, reject) => {
+          const img = new Image();
+          img.crossOrigin = "anonymous";
+          img.onload = () => resolve(img);
+          img.onerror = reject;
+          img.src = mask.maskUrl;
+        });
+
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = canvas.width;
+        tempCanvas.height = canvas.height;
+        const tempCtx = tempCanvas.getContext('2d');
+        if (!tempCtx) continue;
+
+        tempCtx.drawImage(baseImage, 0, 0, canvas.width, canvas.height);
+        const imageData = tempCtx.getImageData(0, 0, canvas.width, canvas.height);
+        const pixels = imageData.data;
+
+        tempCtx.clearRect(0, 0, canvas.width, canvas.height);
+        tempCtx.drawImage(maskImg, 0, 0, canvas.width, canvas.height);
+        const maskData = tempCtx.getImageData(0, 0, canvas.width, canvas.height);
+        const maskPixels = maskData.data;
+
+        const hexToRgb = (hex: string) => {
+          const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+          return result ? {
+            r: parseInt(result[1], 16),
+            g: parseInt(result[2], 16),
+            b: parseInt(result[3], 16)
+          } : { r: 0, g: 0, b: 0 };
+        };
+
+        const colorRgb = hexToRgb(mask.color);
+
+        for (let i = 0; i < pixels.length; i += 4) {
+          const maskAlpha = maskPixels[i + 3] / 255;
+          
+          if (maskAlpha > 0.01) {
+            const origR = pixels[i];
+            const origG = pixels[i + 1];
+            const origB = pixels[i + 2];
+            
+            const brightness = (0.299 * origR + 0.587 * origG + 0.114 * origB) / 255;
+            
+            const tintedR = colorRgb.r * brightness;
+            const tintedG = colorRgb.g * brightness;
+            const tintedB = colorRgb.b * brightness;
+            
+            pixels[i] = origR + (tintedR - origR) * maskAlpha;
+            pixels[i + 1] = origG + (tintedG - origG) * maskAlpha;
+            pixels[i + 2] = origB + (tintedB - origB) * maskAlpha;
+          }
+        }
+
+        tempCtx.putImageData(imageData, 0, 0);
         ctx.globalAlpha = mask.opacity;
-        ctx.globalCompositeOperation = 'multiply';
-        
-        ctx.fillStyle = mask.color;
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        
-        ctx.globalCompositeOperation = 'destination-in';
-        ctx.drawImage(maskImg, 0, 0, canvas.width, canvas.height);
-        
-        ctx.restore();
-      };
-      maskImg.src = mask.maskUrl;
-    });
+        ctx.drawImage(tempCanvas, 0, 0);
+        ctx.globalAlpha = 1;
+
+      } catch (error) {
+        console.error('Failed to render mask:', error);
+      }
+    }
   };
 
   useEffect(() => {
@@ -132,26 +179,34 @@ export function CanvasWorkspace({
     const imageData = ctx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
     const data = imageData.data;
 
-    const tolerance = 30;
+    const tolerance = 35;
     const targetPos = (y * tempCanvas.width + x) * 4;
     const targetR = data[targetPos];
     const targetG = data[targetPos + 1];
     const targetB = data[targetPos + 2];
 
     const visited = new Uint8Array(tempCanvas.width * tempCanvas.height);
-    const stack = [[x, y]];
+    const queue: [number, number][] = [[x, y]];
+    let head = 0;
     
     const colorMatch = (pos: number) => {
       const r = data[pos];
       const g = data[pos + 1];
       const b = data[pos + 2];
-      return Math.abs(r - targetR) <= tolerance &&
-             Math.abs(g - targetG) <= tolerance &&
-             Math.abs(b - targetB) <= tolerance;
+      const a = data[pos + 3];
+      
+      if (a < 10) return false;
+      
+      const dr = Math.abs(r - targetR);
+      const dg = Math.abs(g - targetG);
+      const db = Math.abs(b - targetB);
+      const euclidean = Math.sqrt(dr * dr + dg * dg + db * db);
+      
+      return euclidean <= tolerance * 1.7;
     };
 
-    while (stack.length > 0) {
-      const [cx, cy] = stack.pop()!;
+    while (head < queue.length) {
+      const [cx, cy] = queue[head++];
       if (cx < 0 || cx >= tempCanvas.width || cy < 0 || cy >= tempCanvas.height) continue;
       
       const index = cy * tempCanvas.width + cx;
@@ -162,18 +217,30 @@ export function CanvasWorkspace({
       
       visited[index] = 255;
       
-      stack.push([cx + 1, cy], [cx - 1, cy], [cx, cy + 1], [cx, cy - 1]);
+      queue.push([cx + 1, cy], [cx - 1, cy], [cx, cy + 1], [cx, cy - 1]);
+    }
+
+    const smoothed = new Uint8Array(tempCanvas.width * tempCanvas.height);
+    for (let y = 1; y < tempCanvas.height - 1; y++) {
+      for (let x = 1; x < tempCanvas.width - 1; x++) {
+        const idx = y * tempCanvas.width + x;
+        let sum = 0;
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            sum += visited[(y + dy) * tempCanvas.width + (x + dx)];
+          }
+        }
+        smoothed[idx] = sum > 1275 ? 255 : 0;
+      }
     }
 
     const maskData = ctx.createImageData(tempCanvas.width, tempCanvas.height);
-    for (let i = 0; i < visited.length; i++) {
-      const alpha = visited[i];
+    for (let i = 0; i < smoothed.length; i++) {
+      const alpha = smoothed[i];
+      maskData.data[i * 4] = 255;
+      maskData.data[i * 4 + 1] = 255;
+      maskData.data[i * 4 + 2] = 255;
       maskData.data[i * 4 + 3] = alpha;
-      if (alpha > 0) {
-        maskData.data[i * 4] = 255;
-        maskData.data[i * 4 + 1] = 255;
-        maskData.data[i * 4 + 2] = 255;
-      }
     }
     
     ctx.putImageData(maskData, 0, 0);
@@ -245,7 +312,7 @@ export function CanvasWorkspace({
     setMasks([]);
   };
 
-  const handleDownload = () => {
+  const handleDownload = async () => {
     const canvas = canvasRef.current;
     const baseImage = baseImageRef.current;
     if (!canvas || !baseImage) return;
@@ -258,37 +325,79 @@ export function CanvasWorkspace({
 
     ctx.drawImage(baseImage, 0, 0);
 
-    masks.forEach(mask => {
-      const maskImg = new Image();
-      maskImg.crossOrigin = "anonymous";
-      maskImg.onload = () => {
-        ctx.save();
-        ctx.globalAlpha = mask.opacity;
-        ctx.globalCompositeOperation = 'multiply';
-        
-        ctx.fillStyle = mask.color;
-        ctx.fillRect(0, 0, downloadCanvas.width, downloadCanvas.height);
-        
-        ctx.globalCompositeOperation = 'destination-in';
-        ctx.drawImage(maskImg, 0, 0, downloadCanvas.width, downloadCanvas.height);
-        
-        ctx.restore();
-      };
-      maskImg.src = mask.maskUrl;
-    });
+    const hexToRgb = (hex: string) => {
+      const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+      return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+      } : { r: 0, g: 0, b: 0 };
+    };
 
-    setTimeout(() => {
-      downloadCanvas.toBlob((blob) => {
-        if (blob) {
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = 'customized-furniture.png';
-          a.click();
-          URL.revokeObjectURL(url);
+    for (const mask of masks) {
+      try {
+        const maskImg = await new Promise<HTMLImageElement>((resolve, reject) => {
+          const img = new Image();
+          img.crossOrigin = "anonymous";
+          img.onload = () => resolve(img);
+          img.onerror = reject;
+          img.src = mask.maskUrl;
+        });
+
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = downloadCanvas.width;
+        tempCanvas.height = downloadCanvas.height;
+        const tempCtx = tempCanvas.getContext('2d');
+        if (!tempCtx) continue;
+
+        tempCtx.drawImage(baseImage, 0, 0);
+        const imageData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+        const pixels = imageData.data;
+
+        tempCtx.clearRect(0, 0, tempCanvas.width, tempCanvas.height);
+        tempCtx.drawImage(maskImg, 0, 0);
+        const maskData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+        const maskPixels = maskData.data;
+
+        const colorRgb = hexToRgb(mask.color);
+
+        for (let i = 0; i < pixels.length; i += 4) {
+          const maskAlpha = maskPixels[i + 3] / 255;
+          
+          if (maskAlpha > 0.01) {
+            const origR = pixels[i];
+            const origG = pixels[i + 1];
+            const origB = pixels[i + 2];
+            
+            const brightness = (0.299 * origR + 0.587 * origG + 0.114 * origB) / 255;
+            
+            const tintedR = colorRgb.r * brightness;
+            const tintedG = colorRgb.g * brightness;
+            const tintedB = colorRgb.b * brightness;
+            
+            pixels[i] = origR + (tintedR - origR) * maskAlpha * mask.opacity;
+            pixels[i + 1] = origG + (tintedG - origG) * maskAlpha * mask.opacity;
+            pixels[i + 2] = origB + (tintedB - origB) * maskAlpha * mask.opacity;
+          }
         }
-      });
-    }, 500);
+
+        tempCtx.putImageData(imageData, 0, 0);
+        ctx.drawImage(tempCanvas, 0, 0);
+      } catch (error) {
+        console.error('Failed to apply mask to download:', error);
+      }
+    }
+
+    downloadCanvas.toBlob((blob) => {
+      if (blob) {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'customized-furniture.png';
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+    });
   };
 
   const handleUpdateLastMaskColor = () => {

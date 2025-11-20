@@ -203,26 +203,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
       };
 
       if (autoSegment) {
-        const output = await replicate.run(
-          "cjwbw/semantic-segment-anything",
-          { input }
+        // Use Meta SAM 2 for automatic segmentation
+        const output: any = await replicate.run(
+          "meta/sam-2",
+          { 
+            input: {
+              ...input,
+              points_per_side: 32,
+              pred_iou_thresh: 0.88,
+              stability_score_thresh: 0.95,
+              use_m2m: true
+            }
+          }
         );
 
         console.log('SAM auto-segmentation result:', output);
 
-        const masks = Array.isArray(output) ? output : [];
-        const processedMasks = masks.map((mask: any, index: number) => ({
+        // Meta SAM 2 returns {combined_mask, individual_masks}
+        const individualMasks = output.individual_masks || [];
+        const processedMasks = individualMasks.map((maskUrl: string, index: number) => ({
           maskId: `mask-${index}`,
-          maskData: mask.segmentation || '',
+          maskData: maskUrl, // URL to the mask image
           boundingBox: {
-            x: mask.bbox?.[0] || 0,
-            y: mask.bbox?.[1] || 0,
-            width: mask.bbox?.[2] || 0,
-            height: mask.bbox?.[3] || 0
+            x: 0,
+            y: 0,
+            width: 0,
+            height: 0
           },
-          partLabel: mask.class_name || `Part ${index + 1}`,
-          confidence: mask.stability_score || mask.predicted_iou || 1,
-          area: mask.area || 0,
+          partLabel: `Part ${index + 1}`,
+          confidence: 1,
+          area: 0,
           clickX: null,
           clickY: null
         }));

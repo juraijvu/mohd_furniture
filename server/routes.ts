@@ -57,7 +57,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await writeFile(filePath, req.file.buffer);
 
       const imagePath = `/uploads/${safeFileName}`;
-      const fullUrl = `${process.env.REPLIT_DEV_DOMAIN || 'http://localhost:5000'}${imagePath}`;
+      const domain = process.env.REPLIT_DEV_DOMAIN 
+        ? `https://${process.env.REPLIT_DEV_DOMAIN}` 
+        : 'http://localhost:5000';
+      const fullUrl = `${domain}${imagePath}`;
 
       res.json({ 
         path: imagePath,

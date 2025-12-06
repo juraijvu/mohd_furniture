@@ -203,39 +203,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
       };
 
       if (autoSegment) {
-        // Use Meta SAM 2 for automatic segmentation
+        // Use SAM for automatic segmentation with grid of points
         const output: any = await replicate.run(
-          "meta/sam-2",
+          "zsxkib/sam2:fe97b453f4fa12c50816e89052a24f6934a6c7f5b239c18fa9bb3b7cc58442fe",
           { 
             input: {
-              ...input,
-              points_per_side: 32,
-              pred_iou_thresh: 0.88,
-              stability_score_thresh: 0.95,
-              use_m2m: true
+              image: imageUrl,
+              multimask_output: true
             }
           }
         );
 
         console.log('SAM auto-segmentation result:', output);
 
-        // Meta SAM 2 returns {combined_mask, individual_masks}
-        const individualMasks = output.individual_masks || [];
-        const processedMasks = individualMasks.map((maskUrl: string, index: number) => ({
-          maskId: `mask-${index}`,
-          maskData: maskUrl, // URL to the mask image
-          boundingBox: {
-            x: 0,
-            y: 0,
-            width: 0,
-            height: 0
-          },
-          partLabel: `Part ${index + 1}`,
-          confidence: 1,
-          area: 0,
-          clickX: null,
-          clickY: null
-        }));
+        // Handle different output formats
+        let processedMasks: any[] = [];
+        
+        if (Array.isArray(output)) {
+          processedMasks = output.map((maskUrl: string, index: number) => ({
+            maskId: `mask-${index}`,
+            maskData: maskUrl,
+            boundingBox: { x: 0, y: 0, width: 0, height: 0 },
+            partLabel: `Part ${index + 1}`,
+            confidence: 1,
+            area: 0,
+            clickX: null,
+            clickY: null
+          }));
+        } else if (output && typeof output === 'object') {
+          const masks = output.masks || output.individual_masks || [output];
+          processedMasks = (Array.isArray(masks) ? masks : [masks]).map((mask: any, index: number) => ({
+            maskId: `mask-${index}`,
+            maskData: typeof mask === 'string' ? mask : mask.url || mask.mask,
+            boundingBox: { x: 0, y: 0, width: 0, height: 0 },
+            partLabel: `Part ${index + 1}`,
+            confidence: 1,
+            area: 0,
+            clickX: null,
+            clickY: null
+          }));
+        }
 
         res.json({ masks: processedMasks });
       } else {

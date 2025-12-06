@@ -203,45 +203,64 @@ export async function registerRoutes(app: Express): Promise<Server> {
       };
 
       if (autoSegment) {
-        // Use SAM for automatic segmentation with grid of points
+        // Use Grounded SAM for automatic object detection and segmentation
         const output: any = await replicate.run(
-          "zsxkib/sam2:fe97b453f4fa12c50816e89052a24f6934a6c7f5b239c18fa9bb3b7cc58442fe",
+          "schananas/grounded_sam:ee871c19efb1941f55f66a3d7d960428c8a5afcb77449547fe8e5a3ab9ebc21c",
           { 
             input: {
               image: imageUrl,
-              multimask_output: true
+              mask_prompt: "furniture, chair, table, sofa, legs, seat, cushion, armrest, backrest, frame"
             }
           }
         );
 
-        console.log('SAM auto-segmentation result:', output);
+        console.log('Grounded SAM segmentation result:', output);
 
-        // Handle different output formats
+        // Handle different output formats from Grounded SAM
         let processedMasks: any[] = [];
         
-        if (Array.isArray(output)) {
-          processedMasks = output.map((maskUrl: string, index: number) => ({
-            maskId: `mask-${index}`,
-            maskData: maskUrl,
+        if (output && output.json_output) {
+          // Grounded SAM returns labels and masks
+          const jsonOutput = typeof output.json_output === 'string' 
+            ? JSON.parse(output.json_output) 
+            : output.json_output;
+          
+          if (jsonOutput.detections) {
+            processedMasks = jsonOutput.detections.map((det: any, index: number) => ({
+              maskId: `mask-${index}`,
+              maskData: output.output_image || imageUrl,
+              boundingBox: det.box || { x: 0, y: 0, width: 0, height: 0 },
+              partLabel: det.label || `Part ${index + 1}`,
+              confidence: det.score || 1,
+              area: 0,
+              clickX: null,
+              clickY: null
+            }));
+          }
+        } else if (output && output.output_image) {
+          // Single segmented image output
+          processedMasks = [{
+            maskId: 'mask-0',
+            maskData: output.output_image,
             boundingBox: { x: 0, y: 0, width: 0, height: 0 },
-            partLabel: `Part ${index + 1}`,
+            partLabel: 'Furniture',
             confidence: 1,
             area: 0,
             clickX: null,
             clickY: null
-          }));
-        } else if (output && typeof output === 'object') {
-          const masks = output.masks || output.individual_masks || [output];
-          processedMasks = (Array.isArray(masks) ? masks : [masks]).map((mask: any, index: number) => ({
-            maskId: `mask-${index}`,
-            maskData: typeof mask === 'string' ? mask : mask.url || mask.mask,
+          }];
+        } else if (typeof output === 'string') {
+          // Direct URL output
+          processedMasks = [{
+            maskId: 'mask-0',
+            maskData: output,
             boundingBox: { x: 0, y: 0, width: 0, height: 0 },
-            partLabel: `Part ${index + 1}`,
+            partLabel: 'Furniture',
             confidence: 1,
             area: 0,
             clickX: null,
             clickY: null
-          }));
+          }];
         }
 
         res.json({ masks: processedMasks });
